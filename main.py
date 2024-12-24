@@ -1,16 +1,12 @@
 from fastapi import FastAPI, HTTPException, Query
 import pandas as pd
-import os
-from mangum import Mangum  # Para integrar FastAPI con AWS Lambda
 
 # Inicializar FastAPI
 app = FastAPI()
 
-# Ruta al archivo CSV
-csv_path = os.path.join("data", "df_aggregated.csv")
 
 # Cargar el archivo CSV en un DataFrame de pandas
-data = pd.read_csv(csv_path)
+data = pd.read_csv("data/df_aggregated.csv")
 
 # Reemplazar '/' por '|' en la columna "experiment_name"
 data["experiment_name"] = data["experiment_name"].str.replace("/", "|", regex=False)
