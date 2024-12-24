@@ -4,7 +4,6 @@ import pandas as pd
 # Inicializar FastAPI
 app = FastAPI()
 
-
 # Cargar el archivo CSV en un DataFrame de pandas
 data = pd.read_csv("data/df_aggregated.csv")
 
@@ -22,7 +21,7 @@ async def get_results(
         filtered_data = data[(data["experiment_name"] == experiment_name) & (data["day"] == day)]
 
         # Verificar si el experimento y día existen
-        if filtered_data.empty:
+        if filtered_data.empty:            
             raise HTTPException(
                 status_code=404,
                 detail=f"No data found for experiment '{experiment_name}' on day '{day}'",
@@ -57,7 +56,5 @@ async def get_results(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(f"No data found for experiment '{experiment_name}' on day '{day}'"))
 
-# Integración con AWS Lambda usando Mangum
-handler = Mangum(app)
