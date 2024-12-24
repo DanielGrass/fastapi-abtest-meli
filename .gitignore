@@ -1,2 +1,4 @@
 venv/
 __pycache__/
+lib/
+aws_lambda_artifacts.zip

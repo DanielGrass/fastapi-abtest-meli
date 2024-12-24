@@ -1,55 +1,62 @@
 from fastapi import FastAPI, HTTPException, Query
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, regexp_replace
-from mangum import Mangum
+import pandas as pd
+import os
+from mangum import Mangum  # Para integrar FastAPI con AWS Lambda
 
 # Inicializar FastAPI
 app = FastAPI()
 
-# Configuración de Spark
-spark = SparkSession.builder \
-    .appName("DeltaTableTest") \
-    .config("spark.jars.packages", "io.delta:delta-core_2.12:2.4.0,org.apache.hadoop:hadoop-aws:3.3.4") \
-    .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-    .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain") \
-    .config("spark.python.worker.reuse", "true") \
-    .getOrCreate()
+# Ruta al archivo CSV
+csv_path = os.path.join("data", "df_aggregated.csv")
 
-# Ruta al Delta Table Gold (S3)
-gold_table_path = "s3a://abtest-meli/delta-table-gold-aggregate/"
-gold_df = spark.read.format("delta").load(gold_table_path)
+# Cargar el archivo CSV en un DataFrame de pandas
+data = pd.read_csv(csv_path)
 
-# Ajustar los nombres en gold_df reemplazando / por |
-gold_df = gold_df.withColumn("experiment_name", regexp_replace(col("experiment_name"), "/", "|"))
-
+# Reemplazar '/' por '|' en la columna "experiment_name"
+data["experiment_name"] = data["experiment_name"].str.replace("/", "|", regex=False)
 @app.get("/experiment/{experiment_name}/result")
-async def get_results(experiment_name: str, day: str = Query(..., description="The day in YYYY-MM-DD format")):
+async def get_results(
+    experiment_name: str, day: str = Query(..., description="The day in YYYY-MM-DD format")
+):
+    """
+    Endpoint para obtener los resultados de un experimento en una fecha específica.
+    """
     try:
         # Filtrar por experimento y día
-        exp_data = gold_df.filter(
-            (col("experiment_name") == experiment_name) & (col("day") == day)
-        )
+        filtered_data = data[(data["experiment_name"] == experiment_name) & (data["day"] == day)]
 
-        if exp_data.count() == 0:
-            raise HTTPException(status_code=404, detail=f"No data found for experiment '{experiment_name}' on day '{day}'")
+        # Verificar si el experimento y día existen
+        if filtered_data.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data found for experiment '{experiment_name}' on day '{day}'",
+            )
 
         # Calcular resultados
-        total_participants = exp_data.agg({"users": "sum"}).collect()[0][0]
-        variant_data = exp_data.groupBy("variant_id").sum("purchases").collect()
+        total_participants = filtered_data["users"].sum()
+        variant_data = (
+            filtered_data.groupby("variant_id")["purchases"].sum().reset_index()
+        )
 
-        winner = max(variant_data, key=lambda x: x["sum(purchases)"])["variant_id"]
+        # Determinar ganador
+        winner = variant_data.loc[variant_data["purchases"].idxmax(), "variant_id"]
 
-        variants = [{"id": row["variant_id"], "number_of_purchases": row["sum(purchases)"]} for row in variant_data]
+        # Crear la salida
+        variants = [
+            {
+                "id": int(row["variant_id"]),
+                "number_of_purchases": int(row["purchases"]),
+            }
+            for _, row in variant_data.iterrows()
+        ]
 
         return {
             "results": {
                 "exp_name": experiment_name,
                 "day": day,
-                "number_of_participants": total_participants,
-                "winner": winner,
-                "variants": variants
+                "number_of_participants": int(total_participants),
+                "winner": int(winner),
+                "variants": variants,
             }
         }
 
